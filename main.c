@@ -277,29 +277,6 @@ void print_as_hex(const uint8_t *data, int len) {
     printf("\r\n");
 }
 
-void base64_encode_example() {
-    const char *input = "Hello, nRF!";
-    size_t input_len = strlen(input);
-    unsigned char output[64];
-    size_t output_len;
-
-    // Encode
-    mbedtls_base64_encode(output, sizeof(output), &output_len, (const unsigned char *)input, input_len);
-    printf("Base64 Encoded: %s\r\n", output);
-}
-
-void base64_decode_example() {
-    const char *encoded = "JURSFDQ1MjVjN2FiMWM3OGNiMgDLVaU=";
-    unsigned char output[64];
-    size_t output_len;
-
-    // Decode
-    mbedtls_base64_decode(output, sizeof(output), &output_len, (const unsigned char *)encoded, strlen(encoded));
-    output[output_len] = '\0';  // Ensure null-termination
-    printf("Base64 Decoded: %s\r\n", output);
-}
-
-
 //Initialize all encryption data.
 void crypt_init()
 {
@@ -639,29 +616,6 @@ static void services_init(void)
 }
 
 
-/**@brief Function for handling an event from the Connection Parameters Module.
- *
- * @details This function will be called for all events in the Connection Parameters Module
- *          which are passed to the application.
- *
- * @note All this function does is to disconnect. This could have been done by simply setting
- *       the disconnect_on_fail config parameter, but instead we use the event handler
- *       mechanism to demonstrate its use.
- *
- * @param[in] p_evt  Event received from the Connection Parameters Module.
- */
-static void on_conn_params_evt(ble_conn_params_evt_t * p_evt)
-{
-    uint32_t err_code;
-
-    if (p_evt->evt_type == BLE_CONN_PARAMS_EVT_FAILED)
-    {
-        err_code = sd_ble_gap_disconnect(m_conn_handle, BLE_HCI_CONN_INTERVAL_UNACCEPTABLE);
-        APP_ERROR_CHECK(err_code);
-    }
-}
-
-
 /**@brief Function for handling errors from the Connection Parameters module.
  *
  * @param[in] nrf_error  Error code containing information about what went wrong.
@@ -687,8 +641,8 @@ static void conn_params_init(void)
     cp_init.max_conn_params_update_count   = MAX_CONN_PARAMS_UPDATE_COUNT;
     cp_init.start_on_notify_cccd_handle    = BLE_GATT_HANDLE_INVALID;
     cp_init.disconnect_on_fail             = false;
-    cp_init.evt_handler                    = on_conn_params_evt;
-    cp_init.error_handler                  = conn_params_error_handler;
+    cp_init.evt_handler                    = NULL;
+    cp_init.error_handler                  = NULL;
 
     err_code = ble_conn_params_init(&cp_init);
     APP_ERROR_CHECK(err_code);
@@ -1124,81 +1078,6 @@ static void advertising_start(void)
 {
     uint32_t err_code = ble_advertising_start(&m_advertising, BLE_ADV_MODE_FAST);
     APP_ERROR_CHECK(err_code);
-}
-
-const char *fds_err_str(ret_code_t ret)
-{
-    /* Array to map FDS return values to strings. */
-    static char const * err_str[] =
-    {
-        "FDS_ERR_OPERATION_TIMEOUT",
-        "FDS_ERR_NOT_INITIALIZED",
-        "FDS_ERR_UNALIGNED_ADDR",
-        "FDS_ERR_INVALID_ARG",
-        "FDS_ERR_NULL_ARG",
-        "FDS_ERR_NO_OPEN_RECORDS",
-        "FDS_ERR_NO_SPACE_IN_FLASH",
-        "FDS_ERR_NO_SPACE_IN_QUEUES",
-        "FDS_ERR_RECORD_TOO_LARGE",
-        "FDS_ERR_NOT_FOUND",
-        "FDS_ERR_NO_PAGES",
-        "FDS_ERR_USER_LIMIT_REACHED",
-        "FDS_ERR_CRC_CHECK_FAILED",
-        "FDS_ERR_BUSY",
-        "FDS_ERR_INTERNAL",
-    };
-
-    return err_str[ret - NRF_ERROR_FDS_ERR_BASE];
-}
-
-
-static void fds_evt_handler(fds_evt_t const * p_evt)
-{
-    if (p_evt->result == NRF_SUCCESS)
-    {
-        printf("Event: %s received (NRF_SUCCESS)\r\n",
-                      fds_evt_str[p_evt->id]);
-    }
-    else
-    {
-        printf("Event: %s received (%s)\r\n",
-                      fds_evt_str[p_evt->id],
-                      fds_err_str(p_evt->result));
-    }
-
-    switch (p_evt->id)
-    {
-        case FDS_EVT_INIT:
-            if (p_evt->result == NRF_SUCCESS)
-            {
-                m_fds_initialized = true;
-            }
-            break;
-
-        case FDS_EVT_WRITE:
-        {
-            if (p_evt->result == NRF_SUCCESS)
-            {
-                printf("Record ID:\t0x%04x\r\n",  p_evt->write.record_id);
-                printf("File ID:\t0x%04x\r\n",    p_evt->write.file_id);
-                printf("Record key:\t0x%04x\r\n", p_evt->write.record_key);
-            }
-        } break;
-
-        case FDS_EVT_DEL_RECORD:
-        {
-            if (p_evt->result == NRF_SUCCESS)
-            {
-                printf("Record ID:\t0x%04x\r\n",  p_evt->del.record_id);
-                printf("File ID:\t0x%04x\r\n",    p_evt->del.file_id);
-                printf("Record key:\t0x%04x\r\n", p_evt->del.record_key);
-            }
-            m_delete_all.pending = false;
-        } break;
-
-        default:
-            break;
-    }
 }
 
 void flash_storage_init(void) {
