@@ -695,22 +695,24 @@ static void conn_params_init(void)
 }
 
 
-/**@brief Function for putting the chip into sleep mode.
- *
- * @note This function will not return.
+/**@brief Function for initializing power management.
  */
-static void sleep_mode_enter(void)
+static void power_management_init(void)
 {
-    uint32_t err_code = bsp_indication_set(BSP_INDICATE_IDLE);
+    // Simplified power management - just initialize basic power management
+    ret_code_t err_code = nrf_pwr_mgmt_init();
     APP_ERROR_CHECK(err_code);
+}
 
-    // Prepare wakeup buttons.
-    err_code = bsp_btn_ble_sleep_mode_prepare();
-    APP_ERROR_CHECK(err_code);
 
-    // Go to system-off mode (this function will not return; wakeup will cause a reset).
-    err_code = sd_power_system_off();
-    APP_ERROR_CHECK(err_code);
+/**@brief Function for handling the idle state (main loop).
+ *
+ * @details Sleep until the next event occurs.
+ */
+static void idle_state_handle(void)
+{
+    // Simplified idle state - just wait for events
+    sd_app_evt_wait();
 }
 
 
@@ -731,9 +733,9 @@ static void on_adv_evt(ble_adv_evt_t ble_adv_evt)
             APP_ERROR_CHECK(err_code);
             break;
         case BLE_ADV_EVT_IDLE:
-            //sleep_mode_enter();
+            // Simplified - just restart advertising without sleep mode
             printf("Advertising timeout, restarting...\r\n");
-            ret_code_t err_code = ble_advertising_start(&m_advertising, BLE_ADV_MODE_FAST);
+            err_code = ble_advertising_start(&m_advertising, BLE_ADV_MODE_FAST);
             APP_ERROR_CHECK(err_code);
             break;
         default:
@@ -878,7 +880,7 @@ void bsp_event_handler(bsp_event_t event)
     switch (event)
     {
         case BSP_EVENT_SLEEP:
-            sleep_mode_enter();
+            idle_state_handle();
             break;
 
         case BSP_EVENT_DISCONNECT:
@@ -1113,26 +1115,6 @@ static void buttons_leds_init(bool * p_erase_bonds)
 static void log_init(void)
 {
     // No initialization needed for printf
-}
-
-
-/**@brief Function for initializing power management.
- */
-static void power_management_init(void)
-{
-    ret_code_t err_code;
-    err_code = nrf_pwr_mgmt_init();
-    APP_ERROR_CHECK(err_code);
-}
-
-
-/**@brief Function for handling the idle state (main loop).
- *
- * @details Sleep until the next event occurs.
- */
-static void idle_state_handle(void)
-{
-    nrf_pwr_mgmt_run();
 }
 
 
