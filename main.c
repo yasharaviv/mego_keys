@@ -82,10 +82,6 @@
 #include "nrf_uarte.h"
 #endif
 
-#include "nrf_log.h"
-#include "nrf_log_ctrl.h"
-#include "nrf_log_default_backends.h"
-
 #include "nrf_crypto.h"
 #include "nrf_crypto_error.h"
 
@@ -275,14 +271,10 @@ static bool volatile m_fds_initialized;
 /////////////////////////////////////////////////
 
 void print_as_hex(const uint8_t *data, int len) {
-    char buff[256] = {0};
-    int offset = 0;
-
-    for (int i = 0; i < len && offset < sizeof(buff) - 4; ++i) {  // -4 to leave space for null terminator
-        offset += snprintf(buff + offset, sizeof(buff) - offset, "%d ", data[i]);
+    for (int i = 0; i < len; ++i) {
+        printf("%02X ", data[i]);
     }
-
-    NRF_LOG_INFO("%s", buff);
+    printf("\r\n");
 }
 
 void base64_encode_example() {
@@ -293,7 +285,7 @@ void base64_encode_example() {
 
     // Encode
     mbedtls_base64_encode(output, sizeof(output), &output_len, (const unsigned char *)input, input_len);
-    NRF_LOG_INFO("Base64 Encoded: %s", output);
+    printf("Base64 Encoded: %s\r\n", output);
 }
 
 void base64_decode_example() {
@@ -304,14 +296,14 @@ void base64_decode_example() {
     // Decode
     mbedtls_base64_decode(output, sizeof(output), &output_len, (const unsigned char *)encoded, strlen(encoded));
     output[output_len] = '\0';  // Ensure null-termination
-    NRF_LOG_INFO("Base64 Decoded: %s", output);
+    printf("Base64 Decoded: %s\r\n", output);
 }
 
 
 //Initialize all encryption data.
 void crypt_init()
 {
-    NRF_LOG_INFO("crypt_init"); 
+    printf("crypt_init\r\n"); 
     ret_code_t  ret_val;
     memset(iv, 0, sizeof(iv));    
     
@@ -330,7 +322,7 @@ void crypt_init()
     ret_val = nrf_crypto_aes_iv_set(&cbc_encr_ctx, iv);
     APP_ERROR_CHECK(ret_val);
 
-    NRF_LOG_INFO("crypt_init succeeded"); 
+    printf("crypt_init succeeded\r\n"); 
 }
 
 // Initialize ECDH and generate key pair
@@ -440,13 +432,13 @@ ret_code_t decrypt_data(const uint8_t * data, int len)
 
     if (!m_ecdh_initialized)
     {
-        NRF_LOG_ERROR("ECDH not initialized!");
+        printf("ECDH not initialized!\r\n");
         return NRF_ERROR_INVALID_STATE;
     }
 
     if (len % 16 != 0)
     {
-        NRF_LOG_ERROR("decrypt_data, invalid size!");  
+        printf("decrypt_data, invalid size!\r\n");  
         return NRF_ERROR_INVALID_LENGTH;
     }
 
@@ -524,7 +516,7 @@ static ret_code_t handle_key_exchange(const uint8_t * p_data, uint16_t length, u
             } while (err_code == NRF_ERROR_RESOURCES);
 
             key_exchanged = true;
-            NRF_LOG_INFO("Key exchange completed successfully");
+            printf("Key exchange completed successfully\r\n");
             break;
         }
 
@@ -541,7 +533,7 @@ static ret_code_t handle_key_exchange(const uint8_t * p_data, uint16_t length, u
             APP_ERROR_CHECK(err_code);
 
             key_exchanged = true;
-            NRF_LOG_INFO("Key exchange completed successfully");
+            printf("Key exchange completed successfully\r\n");
             break;
         }
 
@@ -568,7 +560,7 @@ static void nus_data_handler(ble_nus_evt_t * p_evt)
         uint32_t err_code;
         static bool key_exchanged = false;
 
-        NRF_LOG_INFO("Received data from BLE NUS. Writing data on UART.");
+        printf("Received data from BLE NUS\r\n");
 
         // Check if this is a key exchange message
         if (!key_exchanged)
@@ -583,7 +575,7 @@ static void nus_data_handler(ble_nus_evt_t * p_evt)
             }
             else if (err_code != NRF_ERROR_INVALID_DATA)
             {
-                NRF_LOG_ERROR("Key exchange failed: 0x%x", err_code);
+                printf("Key exchange failed: 0x%x\r\n", err_code);
                 return;
             }
             // If NRF_ERROR_INVALID_DATA, continue with normal data processing
@@ -591,19 +583,19 @@ static void nus_data_handler(ble_nus_evt_t * p_evt)
 
         // Handle normal encrypted data
         err_code = decrypt_data(p_evt->params.rx_data.p_data, p_evt->params.rx_data.length);
-        NRF_LOG_INFO("Decryption ended. ret code: 0x%x, size: %d", err_code, decrypted_data_len);
+        printf("Decryption ended. ret code: 0x%x, size: %d\r\n", err_code, decrypted_data_len);
 
         APP_ERROR_CHECK(err_code);
 
         //remove all trailing bytes after the '=' character.
         for(;decrypted_data_len > 0 && decrypted_data[decrypted_data_len-1] < ' '; decrypted_data_len--);
 
-        NRF_LOG_INFO("base64 encoded data length: %d", decrypted_data_len);
+        printf("base64 encoded data length: %d\r\n", decrypted_data_len);
 
         // base64 Decode
         int result = mbedtls_base64_decode(decoded_data, sizeof(decoded_data), &decoded_data_len, decrypted_data, decrypted_data_len);
 
-        NRF_LOG_INFO("base64 decoding ended. result: %d, size: %d", result, decoded_data_len);
+        printf("base64 decoding ended. result: %d, size: %d\r\n", result, decoded_data_len);
         print_as_hex(decoded_data, decoded_data_len);
 
         for (uint32_t i = 0; i < decoded_data_len; i++)
@@ -613,7 +605,7 @@ static void nus_data_handler(ble_nus_evt_t * p_evt)
                 err_code = app_uart_put(decoded_data[i]);
                 if ((err_code != NRF_SUCCESS) && (err_code != NRF_ERROR_BUSY))
                 {
-                    NRF_LOG_ERROR("Failed receiving NUS message. Error 0x%x. ", err_code);
+                    printf("Failed receiving NUS message. Error 0x%x. \r\n", err_code);
                     APP_ERROR_CHECK(err_code);
                 }
             } while (err_code == NRF_ERROR_BUSY);
@@ -740,7 +732,7 @@ static void on_adv_evt(ble_adv_evt_t ble_adv_evt)
             break;
         case BLE_ADV_EVT_IDLE:
             //sleep_mode_enter();
-            NRF_LOG_INFO("Advertising timeout, restarting...");
+            printf("Advertising timeout, restarting...\r\n");
             ret_code_t err_code = ble_advertising_start(&m_advertising, BLE_ADV_MODE_FAST);
             APP_ERROR_CHECK(err_code);
             break;
@@ -762,29 +754,25 @@ static void ble_evt_handler(ble_evt_t const * p_ble_evt, void * p_context)
     switch (p_ble_evt->header.evt_id)
     {
         case BLE_GAP_EVT_CONNECTED:
-            NRF_LOG_INFO("Connected");
+            printf("Connected\r\n");
             err_code = bsp_indication_set(BSP_INDICATE_CONNECTED);
             APP_ERROR_CHECK(err_code);
             m_conn_handle = p_ble_evt->evt.gap_evt.conn_handle;
             err_code = nrf_ble_qwr_conn_handle_assign(&m_qwr, m_conn_handle);
             APP_ERROR_CHECK(err_code);
-
-            //notify the microcontroller that a connection established.
             printf("+CONNECTED\r\n");
             break;
 
         case BLE_GAP_EVT_DISCONNECTED:
-            NRF_LOG_INFO("Disconnected");
+            printf("Disconnected\r\n");
             // LED indication will be changed when advertising starts.
             m_conn_handle = BLE_CONN_HANDLE_INVALID;
-
-            //notify the microcontroller that a connection endded.
             printf("+DISCONNECTED\r\n");
             break;
 
         case BLE_GAP_EVT_PHY_UPDATE_REQUEST:
         {
-            NRF_LOG_DEBUG("PHY update request.");
+            printf("PHY update request.\r\n");
             ble_gap_phys_t const phys =
             {
                 .rx_phys = BLE_GAP_PHY_2MBPS,
@@ -859,9 +847,9 @@ void gatt_evt_handler(nrf_ble_gatt_t * p_gatt, nrf_ble_gatt_evt_t const * p_evt)
     if ((m_conn_handle == p_evt->conn_handle) && (p_evt->evt_id == NRF_BLE_GATT_EVT_ATT_MTU_UPDATED))
     {
         m_ble_nus_max_data_len = p_evt->params.att_mtu_effective - OPCODE_LENGTH - HANDLE_LENGTH;
-        NRF_LOG_INFO("Data len is set to 0x%X(%d)", m_ble_nus_max_data_len, m_ble_nus_max_data_len);
+        printf("Data len is set to 0x%X(%d)\r\n", m_ble_nus_max_data_len, m_ble_nus_max_data_len);
     }
-    NRF_LOG_DEBUG("ATT MTU exchange completed. central 0x%x peripheral 0x%x",
+    printf("ATT MTU exchange completed. central 0x%x peripheral 0x%x\r\n",
                   p_gatt->att_mtu_desired_central,
                   p_gatt->att_mtu_desired_periph);
 }
@@ -949,14 +937,14 @@ void uart_event_handle(app_uart_evt_t * p_event)
                 {
                     if (index > 3)
                     {
-                        NRF_LOG_INFO("Ready to send data over BLE NUS");
+                        printf("Ready to send data over BLE NUS\r\n");
                         
                         print_as_hex(data_array, index);   
                                                                    
                         // Encode to base 64
                         mbedtls_base64_encode(encoded_data, sizeof(encoded_data), &encoded_data_len, (const unsigned char *)data_array, index-3);
 
-                        NRF_LOG_INFO("base64 encoded data: %s", encoded_data);
+                        printf("base64 encoded data: %s\r\n", encoded_data);
                         print_as_hex(encoded_data, encoded_data_len);
 
                         if (!key_exchanged)
@@ -1013,9 +1001,7 @@ void uart_event_handle(app_uart_evt_t * p_event)
                 {
                     if (index > 2)
                     {
-                        NRF_LOG_HEXDUMP_DEBUG(data_array, index);
-                        data_array[index - 2] = '\0';
-                        NRF_LOG_INFO("AT Command recieved: %s", (char *)data_array);
+                        printf("AT Command recieved: %s\r\n", (char *)data_array);
                         
                         at_command_parse(data_array, index - 2);
 
@@ -1126,10 +1112,7 @@ static void buttons_leds_init(bool * p_erase_bonds)
  */
 static void log_init(void)
 {
-    ret_code_t err_code = NRF_LOG_INIT(NULL);
-    APP_ERROR_CHECK(err_code);
-
-    NRF_LOG_DEFAULT_BACKENDS_INIT();
+    // No initialization needed for printf
 }
 
 
@@ -1194,12 +1177,12 @@ static void fds_evt_handler(fds_evt_t const * p_evt)
 {
     if (p_evt->result == NRF_SUCCESS)
     {
-        NRF_LOG_DEBUG("Event: %s received (NRF_SUCCESS)",
+        printf("Event: %s received (NRF_SUCCESS)\r\n",
                       fds_evt_str[p_evt->id]);
     }
     else
     {
-        NRF_LOG_DEBUG("Event: %s received (%s)",
+        printf("Event: %s received (%s)\r\n",
                       fds_evt_str[p_evt->id],
                       fds_err_str(p_evt->result));
     }
@@ -1217,9 +1200,9 @@ static void fds_evt_handler(fds_evt_t const * p_evt)
         {
             if (p_evt->result == NRF_SUCCESS)
             {
-                NRF_LOG_INFO("Record ID:\t0x%04x",  p_evt->write.record_id);
-                NRF_LOG_INFO("File ID:\t0x%04x",    p_evt->write.file_id);
-                NRF_LOG_INFO("Record key:\t0x%04x", p_evt->write.record_key);
+                printf("Record ID:\t0x%04x\r\n",  p_evt->write.record_id);
+                printf("File ID:\t0x%04x\r\n",    p_evt->write.file_id);
+                printf("Record key:\t0x%04x\r\n", p_evt->write.record_key);
             }
         } break;
 
@@ -1227,9 +1210,9 @@ static void fds_evt_handler(fds_evt_t const * p_evt)
         {
             if (p_evt->result == NRF_SUCCESS)
             {
-                NRF_LOG_INFO("Record ID:\t0x%04x",  p_evt->del.record_id);
-                NRF_LOG_INFO("File ID:\t0x%04x",    p_evt->del.file_id);
-                NRF_LOG_INFO("Record key:\t0x%04x", p_evt->del.record_key);
+                printf("Record ID:\t0x%04x\r\n",  p_evt->del.record_id);
+                printf("File ID:\t0x%04x\r\n",    p_evt->del.file_id);
+                printf("Record key:\t0x%04x\r\n", p_evt->del.record_key);
             }
             m_delete_all.pending = false;
         } break;
@@ -1271,12 +1254,12 @@ static void wait_for_fds_ready(void)
 void gpio_event_handler(uint8_t pin_no, uint8_t button_action) {
     if (pin_no == GPIO_INPUT_PIN) {
         if (button_action == APP_BUTTON_PUSH) {
-            NRF_LOG_DEBUG("GPIO P0.4 went LOW");
-            NRF_LOG_INFO("AT Command mode is OFF");
+            printf("GPIO P0.4 went LOW\r\n");
+            printf("AT Command mode is OFF\r\n");
             m_at_command_mode = false;
         } else if (button_action == APP_BUTTON_RELEASE) {
-            NRF_LOG_DEBUG("GPIO P0.4 went HIGH");
-            NRF_LOG_INFO("AT Command mode is ON");
+            printf("GPIO P0.4 went HIGH\r\n");
+            printf("AT Command mode is ON\r\n");
             m_at_command_mode = true;
         }
     }
@@ -1323,11 +1306,11 @@ int main(void)
 
     //Check the state of AT command pin
     if (nrf_gpio_pin_read(GPIO_INPUT_PIN) == 0) {
-        NRF_LOG_INFO("AT Command mode is OFF");
+        printf("AT Command mode is OFF\r\n");
         // Button is pressed at startup
         m_at_command_mode = false;
     } else {
-        NRF_LOG_INFO("AT Command mode is ON");
+        printf("AT Command mode is ON\r\n");
         // Button is NOT pressed at startup
         m_at_command_mode = true;
     }
@@ -1358,7 +1341,7 @@ int main(void)
     
     // Start execution.
     printf("OK\r\n");
-    NRF_LOG_INFO("Debug logging for UART over RTT started.");
+    printf("Debug logging for UART over RTT started.\r\n");
     
     crypt_init();    
 
