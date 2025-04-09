@@ -1128,14 +1128,11 @@ static void power_management_init(void)
 
 /**@brief Function for handling the idle state (main loop).
  *
- * @details If there is no pending log operation, then sleep until next the next event occurs.
+ * @details Sleep until the next event occurs.
  */
 static void idle_state_handle(void)
 {
-    if (NRF_LOG_PROCESS() == false)
-    {
-        nrf_pwr_mgmt_run();
-    }
+    nrf_pwr_mgmt_run();
 }
 
 
