@@ -267,8 +267,51 @@ static struct
 /* Flag to check fds initialization. */
 static bool volatile m_fds_initialized;
 
+static void fds_evt_handler(fds_evt_t const * p_evt)
+{
+    if (p_evt->result == NRF_SUCCESS)
+    {
+        printf("Event: %s received (NRF_SUCCESS)\r\n", fds_evt_str[p_evt->id]);
+    }
+    else
+    {
+        printf("Event: %s received (Error: 0x%x)\r\n", fds_evt_str[p_evt->id], p_evt->result);
+    }
 
-/////////////////////////////////////////////////
+    switch (p_evt->id)
+    {
+        case FDS_EVT_INIT:
+            if (p_evt->result == NRF_SUCCESS)
+            {
+                m_fds_initialized = true;
+            }
+            break;
+
+        case FDS_EVT_WRITE:
+        {
+            if (p_evt->result == NRF_SUCCESS)
+            {
+                printf("Record ID:\t0x%04x\r\n",  p_evt->write.record_id);
+                printf("File ID:\t0x%04x\r\n",    p_evt->write.file_id);
+                printf("Record key:\t0x%04x\r\n", p_evt->write.record_key);
+            }
+        } break;
+
+        case FDS_EVT_DEL_RECORD:
+        {
+            if (p_evt->result == NRF_SUCCESS)
+            {
+                printf("Record ID:\t0x%04x\r\n",  p_evt->del.record_id);
+                printf("File ID:\t0x%04x\r\n",    p_evt->del.file_id);
+                printf("Record key:\t0x%04x\r\n", p_evt->del.record_key);
+            }
+            m_delete_all.pending = false;
+        } break;
+
+        default:
+            break;
+    }
+}
 
 void print_as_hex(const uint8_t *data, int len) {
     for (int i = 0; i < len; ++i) {
