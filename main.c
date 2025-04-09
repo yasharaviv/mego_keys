@@ -88,13 +88,17 @@
 #include "fds.h"
 #include "nrf_fstorage.h"
 
-#include "mbedtls/base64.h"
-
+// Remove base64 encoding/decoding
+// #include "mbedtls/base64.h"
 
 #define APP_BLE_CONN_CFG_TAG            1                                           /**< A tag identifying the SoftDevice BLE configuration. */
 
 #define DEVICE_NAME                     "MEGO"                               /**< Name of device. Will be included in the advertising data. */
 #define NUS_SERVICE_UUID_TYPE           BLE_UUID_TYPE_VENDOR_BEGIN                  /**< UUID type for the Nordic UART Service (vendor specific). */
+
+// Reduce buffer sizes
+#define NRF_CRYPTO_AES_MAX_DATA_SIZE    (64)   /**< Reduced from 128 */
+#define BASE64_MAX_DATA_SIZE            (64)   /**< Reduced from 128 */
 
 // Key exchange message types
 #define MSG_TYPE_KEY_EXCHANGE_REQ       0x0001  /**< Key exchange request message type */
@@ -102,7 +106,7 @@
 #define MSG_TYPE_DATA                   0x0003  /**< Encrypted data message type */
 
 #define KEY_EXCHANGE_MSG_HEADER_SIZE    2       /**< Size of message type header */
-#define PUBLIC_KEY_SIZE                 48      /**< Size of secp192r1 public key (was 64 for secp256r1) */
+#define PUBLIC_KEY_SIZE                 64      /**< Size of secp256r1 public key */
 
 #define APP_BLE_OBSERVER_PRIO           3                                           /**< Application's BLE observer priority. You shouldn't need to modify this value. */
 
@@ -211,14 +215,10 @@ static void nrf_qwr_error_handler(uint32_t nrf_error)
 /////////////////////////////////////////////////
 //encrypt globals
 /////////////////////////////////////////////////
-#define NRF_CRYPTO_AES_MAX_DATA_SIZE    (64)
-#define BASE64_MAX_DATA_SIZE            (64)
-
-// ECDH related structures and variables
 static nrf_crypto_ecc_private_key_t m_private_key;
 static nrf_crypto_ecc_public_key_t m_public_key;
-static nrf_crypto_ecc_secp192r1_raw_public_key_t m_raw_public_key;
-static nrf_crypto_ecdh_secp192r1_shared_secret_t m_shared_secret;
+static nrf_crypto_ecc_secp256r1_raw_public_key_t m_raw_public_key;
+static nrf_crypto_ecdh_secp256r1_shared_secret_t m_shared_secret;
 static bool m_ecdh_initialized = false;
 
 static uint8_t m_key[32] = {'A', 'O', 'R', 'D', 'I', 'C', ' ',
@@ -236,12 +236,6 @@ static int encrypted_data_len = 0;
   
 static char decrypted_data[NRF_CRYPTO_AES_MAX_DATA_SIZE];    
 static int decrypted_data_len = 0;
-
-static uint8_t decoded_data[BASE64_MAX_DATA_SIZE];  
-static int decoded_data_len = 0;
-
-static char encoded_data[BASE64_MAX_DATA_SIZE];  
-static int encoded_data_len = 0;
 
 /////////////////////////////////////////////////
 //FDS globals
@@ -356,9 +350,9 @@ ret_code_t ecdh_init(void)
         return NRF_SUCCESS;
     }
 
-    // Generate new key pair using secp192r1 curve
+    // Generate new key pair
     err_code = nrf_crypto_ecc_key_pair_generate(NULL,
-                                               &g_nrf_crypto_ecc_secp192r1_curve_info,
+                                               &g_nrf_crypto_ecc_secp256r1_curve_info,
                                                &m_private_key,
                                                &m_public_key);
     APP_ERROR_CHECK(err_code);
@@ -386,7 +380,7 @@ ret_code_t ecdh_compute_shared_secret(const uint8_t *p_peer_public_key, size_t k
     size_t shared_secret_size;
 
     // Convert received public key to internal format
-    err_code = nrf_crypto_ecc_public_key_from_raw(&g_nrf_crypto_ecc_secp192r1_curve_info,
+    err_code = nrf_crypto_ecc_public_key_from_raw(&g_nrf_crypto_ecc_secp256r1_curve_info,
                                                  &peer_public_key,
                                                  p_peer_public_key,
                                                  key_size);
@@ -481,14 +475,7 @@ ret_code_t decrypt_data(const uint8_t * data, int len)
     return ret_val;
 }
 
-/** @brief Function to handle key exchange over BLE.
- *
- * @param[in] p_data     Pointer to received data
- * @param[in] length     Length of received data
- * @param[in] conn_handle Connection handle
- *
- * @return NRF_SUCCESS if key exchange was successful, otherwise an error code.
- */
+// Handle key exchange
 static ret_code_t handle_key_exchange(const uint8_t * p_data, uint16_t length, uint16_t conn_handle)
 {
     ret_code_t err_code;
@@ -612,17 +599,11 @@ static void nus_data_handler(ble_nus_evt_t * p_evt)
 
         printf("base64 encoded data length: %d\r\n", decrypted_data_len);
 
-        // base64 Decode
-        int result = mbedtls_base64_decode(decoded_data, sizeof(decoded_data), &decoded_data_len, decrypted_data, decrypted_data_len);
-
-        printf("base64 decoding ended. result: %d, size: %d\r\n", result, decoded_data_len);
-        print_as_hex(decoded_data, decoded_data_len);
-
-        for (uint32_t i = 0; i < decoded_data_len; i++)
+        for (uint32_t i = 0; i < decrypted_data_len; i++)
         {
             do
             {                
-                err_code = app_uart_put(decoded_data[i]);
+                err_code = app_uart_put(decrypted_data[i]);
                 if ((err_code != NRF_SUCCESS) && (err_code != NRF_ERROR_BUSY))
                 {
                     printf("Failed receiving NUS message. Error 0x%x. \r\n", err_code);
@@ -940,12 +921,6 @@ void uart_event_handle(app_uart_evt_t * p_event)
                         
                         print_as_hex(data_array, index);   
                                                                    
-                        // Encode to base 64
-                        mbedtls_base64_encode(encoded_data, sizeof(encoded_data), &encoded_data_len, (const unsigned char *)data_array, index-3);
-
-                        printf("base64 encoded data: %s\r\n", encoded_data);
-                        print_as_hex(encoded_data, encoded_data_len);
-
                         if (!key_exchanged)
                         {
                             // Send our public key first
@@ -971,7 +946,7 @@ void uart_event_handle(app_uart_evt_t * p_event)
                         else
                         {
                             // Encrypt and send data
-                            err_code = encrypt_data(encoded_data, encoded_data_len); 
+                            err_code = encrypt_data(data_array, index-3); 
                             APP_ERROR_CHECK(err_code);
 
                             do
