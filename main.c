@@ -82,10 +82,6 @@
 #include "nrf_uarte.h"
 #endif
 
-#include "nrf_log.h"
-#include "nrf_log_ctrl.h"
-#include "nrf_log_default_backends.h"
-
 #include "nrf_crypto.h"
 #include "nrf_crypto_error.h"
 
@@ -122,10 +118,10 @@ const char *flash_mgr_get_device_name(void);
 
 #define APP_ADV_DURATION                18000                                       /**< The advertising duration (180 seconds) in units of 10 milliseconds. */
 
-#define MIN_CONN_INTERVAL               MSEC_TO_UNITS(20, UNIT_1_25_MS)             /**< Minimum acceptable connection interval (20 ms), Connection interval uses 1.25 ms units. */
-#define MAX_CONN_INTERVAL               MSEC_TO_UNITS(75, UNIT_1_25_MS)             /**< Maximum acceptable connection interval (75 ms), Connection interval uses 1.25 ms units. */
+#define MIN_CONN_INTERVAL               MSEC_TO_UNITS(30, UNIT_1_25_MS)             /**< Minimum acceptable connection interval (30 ms), Connection interval uses 1.25 ms units. */
+#define MAX_CONN_INTERVAL               MSEC_TO_UNITS(50, UNIT_1_25_MS)             /**< Maximum acceptable connection interval (50 ms), Connection interval uses 1.25 ms units. */
 #define SLAVE_LATENCY                   0                                           /**< Slave latency. */
-#define CONN_SUP_TIMEOUT                MSEC_TO_UNITS(4000, UNIT_10_MS)             /**< Connection supervisory timeout (4 seconds), Supervision Timeout uses 10 ms units. */
+#define CONN_SUP_TIMEOUT                MSEC_TO_UNITS(2000, UNIT_10_MS)             /**< Connection supervisory timeout (2 seconds), Supervision Timeout uses 10 ms units. */
 #define FIRST_CONN_PARAMS_UPDATE_DELAY  APP_TIMER_TICKS(5000)                       /**< Time from initiating event (connect or start of notification) to first time sd_ble_gap_conn_param_update is called (5 seconds). */
 #define NEXT_CONN_PARAMS_UPDATE_DELAY   APP_TIMER_TICKS(30000)                      /**< Time between each call to sd_ble_gap_conn_param_update after the first call (30 seconds). */
 #define MAX_CONN_PARAMS_UPDATE_COUNT    3                                           /**< Number of attempts before giving up the connection parameter negotiation. */
@@ -1108,10 +1104,10 @@ static void buttons_leds_init(bool * p_erase_bonds)
  */
 static void log_init(void)
 {
-    ret_code_t err_code = NRF_LOG_INIT(NULL);
-    APP_ERROR_CHECK(err_code);
-
-    NRF_LOG_DEFAULT_BACKENDS_INIT();
+    // Disable logging initialization
+    // ret_code_t err_code = NRF_LOG_INIT(NULL);
+    // APP_ERROR_CHECK(err_code);
+    // NRF_LOG_DEFAULT_BACKENDS_INIT();
 }
 
 
@@ -1131,10 +1127,8 @@ static void power_management_init(void)
  */
 static void idle_state_handle(void)
 {
-    if (NRF_LOG_PROCESS() == false)
-    {
-        nrf_pwr_mgmt_run();
-    }
+    // Remove logging check
+    nrf_pwr_mgmt_run();
 }
 
 
@@ -1385,7 +1379,7 @@ int main(void)
 
     // Initialize.
     uart_init();
-    log_init();
+    // log_init();  // Remove logging initialization
     timers_init();
     //buttons_leds_init(&erase_bonds);
 
@@ -1394,11 +1388,9 @@ int main(void)
 
     //Check the state of AT command pin
     if (nrf_gpio_pin_read(GPIO_INPUT_PIN) == 0) {
-        NRF_LOG_INFO("AT Command mode is OFF");
         // Button is pressed at startup
         m_at_command_mode = false;
     } else {
-        NRF_LOG_INFO("AT Command mode is ON");
         // Button is NOT pressed at startup
         m_at_command_mode = true;
     }
@@ -1429,7 +1421,6 @@ int main(void)
     
     // Start execution.
     printf("OK\r\n");
-    NRF_LOG_INFO("Debug logging for UART over RTT started.");
     
     crypt_init();    
 
