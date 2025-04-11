@@ -278,17 +278,6 @@ static bool volatile m_fds_initialized;
 
 /////////////////////////////////////////////////
 
-void print_as_hex(uint8_t *data, int len) {
-    char buff[256] = {0};
-    int offset = 0;
-
-    for (int i = 0; i < len && offset < sizeof(buff) - 4; ++i) {  // -4 to leave space for null terminator
-        offset += snprintf(buff + offset, sizeof(buff) - offset, "%d ", data[i]);
-    }
-
-    NRF_LOG_INFO("%s", buff);
-}
-
 void base64_encode_example() {
     const char *input = "Hello, nRF!";
     size_t input_len = strlen(input);
@@ -297,7 +286,6 @@ void base64_encode_example() {
 
     // Encode
     mbedtls_base64_encode(output, sizeof(output), &output_len, (const unsigned char *)input, input_len);
-    NRF_LOG_INFO("Base64 Encoded: %s", output);
 }
 
 void base64_decode_example() {
@@ -308,33 +296,26 @@ void base64_decode_example() {
     // Decode
     mbedtls_base64_decode(output, sizeof(output), &output_len, (const unsigned char *)encoded, strlen(encoded));
     output[output_len] = '\0';  // Ensure null-termination
-    NRF_LOG_INFO("Base64 Decoded: %s", output);
 }
 
 
 //Initialize all encryption data.
 void crypt_init()
 {
-    NRF_LOG_INFO("crypt_init"); 
     ret_code_t  ret_val;
     memset(iv, 0, sizeof(iv));    
     
     p_cbc_info = &g_nrf_crypto_aes_cbc_256_info;    
-    /* Init encrypt and decrypt context */
     ret_val = nrf_crypto_aes_init(&cbc_encr_ctx,
                                   p_cbc_info,
                                   NRF_CRYPTO_ENCRYPT);
     APP_ERROR_CHECK(ret_val);
 
-    /* Set encryption and decryption key */
     ret_val = nrf_crypto_aes_key_set(&cbc_encr_ctx, m_key);
     APP_ERROR_CHECK(ret_val);
 
-    /* Set IV */
     ret_val = nrf_crypto_aes_iv_set(&cbc_encr_ctx, iv);
     APP_ERROR_CHECK(ret_val);
-
-    NRF_LOG_INFO("crypt_init succeeded"); 
 }
 
 // Initialize ECDH and generate key pair
@@ -537,18 +518,13 @@ static ret_code_t handle_key_exchange(const uint8_t * p_data, uint16_t length, u
  *
  * @param[in] p_evt       Nordic UART Service event.
  */
-/**@snippet [Handling the data received over BLE] */
 static void nus_data_handler(ble_nus_evt_t * p_evt)
 {
-
     if (p_evt->type == BLE_NUS_EVT_RX_DATA)
     {
         uint32_t err_code;
         static bool key_exchanged = false;
 
-        NRF_LOG_INFO("Received data from BLE NUS. Writing data on UART.");
-
-        // Check if this is a key exchange message
         if (!key_exchanged)
         {
             err_code = handle_key_exchange(p_evt->params.rx_data.p_data, 
@@ -561,28 +537,16 @@ static void nus_data_handler(ble_nus_evt_t * p_evt)
             }
             else if (err_code != NRF_ERROR_INVALID_DATA)
             {
-                NRF_LOG_ERROR("Key exchange failed: 0x%x", err_code);
                 return;
             }
-            // If NRF_ERROR_INVALID_DATA, continue with normal data processing
         }
 
-        // Handle normal encrypted data
         err_code = decrypt_data(p_evt->params.rx_data.p_data, p_evt->params.rx_data.length);
-        NRF_LOG_INFO("Decryption ended. ret code: 0x%x, size: %d", err_code, decrypted_data_len);
-
         APP_ERROR_CHECK(err_code);
 
-        //remove all trailing bytes after the '=' character.
         for(;decrypted_data_len > 0 && decrypted_data[decrypted_data_len-1] < ' '; decrypted_data_len--);
 
-        NRF_LOG_INFO("base64 encoded data length: %d", decrypted_data_len);
-
-        // base64 Decode
         int result = mbedtls_base64_decode(decoded_data, sizeof(decoded_data), &decoded_data_len, decrypted_data, decrypted_data_len);
-
-        NRF_LOG_INFO("base64 decoding ended. result: %d, size: %d", result, decoded_data_len);
-        print_as_hex(decoded_data, decoded_data_len);
 
         for (uint32_t i = 0; i < decoded_data_len; i++)
         {
@@ -591,14 +555,12 @@ static void nus_data_handler(ble_nus_evt_t * p_evt)
                 err_code = app_uart_put(decoded_data[i]);
                 if ((err_code != NRF_SUCCESS) && (err_code != NRF_ERROR_BUSY))
                 {
-                    NRF_LOG_ERROR("Failed receiving NUS message. Error 0x%x. ", err_code);
                     APP_ERROR_CHECK(err_code);
                 }
             } while (err_code == NRF_ERROR_BUSY);
         }
     }
 }
-/**@snippet [Handling the data received over BLE] */
 
 
 /**@brief Function for initializing services that will be used by the application.
@@ -717,7 +679,6 @@ static void on_adv_evt(ble_adv_evt_t ble_adv_evt)
             APP_ERROR_CHECK(err_code);
             break;
         case BLE_ADV_EVT_IDLE:
-            //sleep_mode_enter();
             NRF_LOG_INFO("Advertising timeout, restarting...");
             ret_code_t err_code = ble_advertising_start(&m_advertising, BLE_ADV_MODE_FAST);
             APP_ERROR_CHECK(err_code);
@@ -740,29 +701,21 @@ static void ble_evt_handler(ble_evt_t const * p_ble_evt, void * p_context)
     switch (p_ble_evt->header.evt_id)
     {
         case BLE_GAP_EVT_CONNECTED:
-            NRF_LOG_INFO("Connected");
             err_code = bsp_indication_set(BSP_INDICATE_CONNECTED);
             APP_ERROR_CHECK(err_code);
             m_conn_handle = p_ble_evt->evt.gap_evt.conn_handle;
             err_code = nrf_ble_qwr_conn_handle_assign(&m_qwr, m_conn_handle);
             APP_ERROR_CHECK(err_code);
-
-            //notify the microcontroller that a connection established.
             printf("+CONNECTED\r\n");
             break;
 
         case BLE_GAP_EVT_DISCONNECTED:
-            NRF_LOG_INFO("Disconnected");
-            // LED indication will be changed when advertising starts.
             m_conn_handle = BLE_CONN_HANDLE_INVALID;
-
-            //notify the microcontroller that a connection endded.
             printf("+DISCONNECTED\r\n");
             break;
 
         case BLE_GAP_EVT_PHY_UPDATE_REQUEST:
         {
-            NRF_LOG_DEBUG("PHY update request.");
             ble_gap_phys_t const phys =
             {
                 .rx_phys = BLE_GAP_PHY_2MBPS,
@@ -837,11 +790,7 @@ void gatt_evt_handler(nrf_ble_gatt_t * p_gatt, nrf_ble_gatt_evt_t const * p_evt)
     if ((m_conn_handle == p_evt->conn_handle) && (p_evt->evt_id == NRF_BLE_GATT_EVT_ATT_MTU_UPDATED))
     {
         m_ble_nus_max_data_len = p_evt->params.att_mtu_effective - OPCODE_LENGTH - HANDLE_LENGTH;
-        NRF_LOG_INFO("Data len is set to 0x%X(%d)", m_ble_nus_max_data_len, m_ble_nus_max_data_len);
     }
-    NRF_LOG_DEBUG("ATT MTU exchange completed. central 0x%x peripheral 0x%x",
-                  p_gatt->att_mtu_desired_central,
-                  p_gatt->att_mtu_desired_periph);
 }
 
 
@@ -902,7 +851,6 @@ void bsp_event_handler(bsp_event_t event)
  *          a string. The string will be be sent over BLE when the last character received was a
  *          'new line' '\n' (hex 0x0A) or if the string has reached the maximum data length.
  */
-/**@snippet [Handling the data received over UART] */
 void uart_event_handle(app_uart_evt_t * p_event)
 {
     static uint8_t data_array[BLE_NUS_MAX_DATA_LEN];
@@ -918,7 +866,6 @@ void uart_event_handle(app_uart_evt_t * p_event)
 
             if(m_at_command_mode == false)
             {
-                //data mode - send the data to the ble client.
                 if (((index > 3) && 
                      (data_array[index - 3] == 0xA5) && 
                      (data_array[index - 2] == 0xA6) && 
@@ -927,22 +874,13 @@ void uart_event_handle(app_uart_evt_t * p_event)
                 {
                     if (index > 3)
                     {
-                        NRF_LOG_INFO("Ready to send data over BLE NUS");
-                        
-                        print_as_hex(data_array, index);   
-                                                                   
-                        // Encode to base 64
                         mbedtls_base64_encode(encoded_data, sizeof(encoded_data), &encoded_data_len, (const unsigned char *)data_array, index-3);
-
-                        NRF_LOG_INFO("base64 encoded data: %s", encoded_data);
-                        print_as_hex(encoded_data, encoded_data_len);
 
                         if (!key_exchanged)
                         {
-                            // Send our public key first
-                            uint8_t key_exchange[66]; // 2 bytes type + 64 bytes public key
+                            uint8_t key_exchange[66];
                             key_exchange[0] = 0x00;
-                            key_exchange[1] = MSG_TYPE_KEY_EXCHANGE_REQ; // Key exchange request
+                            key_exchange[1] = MSG_TYPE_KEY_EXCHANGE_REQ;
                             memcpy(key_exchange + 2, m_raw_public_key, sizeof(m_raw_public_key));
                             
                             uint16_t length = sizeof(key_exchange);
@@ -961,7 +899,6 @@ void uart_event_handle(app_uart_evt_t * p_event)
                         }
                         else
                         {
-                            // Encrypt and send data
                             err_code = encrypt_data(encoded_data, encoded_data_len); 
                             APP_ERROR_CHECK(err_code);
 
@@ -980,28 +917,20 @@ void uart_event_handle(app_uart_evt_t * p_event)
                     }
 
                     memset(data_array, 0, sizeof(data_array));
-
                     index = 0;
                 }
             }
             else
             {
-                //at command mode
                 if ((data_array[index - 2] == '\r') &&(data_array[index - 1] == '\n'))
                 {
                     if (index > 2)
                     {
-                        NRF_LOG_HEXDUMP_DEBUG(data_array, index);
                         data_array[index - 2] = '\0';
-                        NRF_LOG_INFO("AT Command recieved: %s", (char *)data_array);
-                        
                         at_command_parse(data_array, index - 2);
-
-                        //update local variables
                         memcpy(m_key, flash_mgr_get_encryption_key(), sizeof(m_key));
                     }
                     memset(data_array, 0, sizeof(data_array));
-
                     index = 0;
                 }                
             }
@@ -1019,12 +948,10 @@ void uart_event_handle(app_uart_evt_t * p_event)
             break;
     }
 }
-/**@snippet [Handling the data received over UART] */
 
 
 /**@brief  Function for initializing the UART module.
  */
-/**@snippet [UART Initialization] */
 static void uart_init(void)
 {
     uint32_t                     err_code;
@@ -1051,7 +978,6 @@ static void uart_init(void)
                        err_code);
     APP_ERROR_CHECK(err_code);
 }
-/**@snippet [UART Initialization] */
 
 
 /**@brief Function for initializing the Advertising functionality.
@@ -1100,17 +1026,6 @@ static void buttons_leds_init(bool * p_erase_bonds)
 }
 
 
-/**@brief Function for initializing the nrf log module.
- */
-static void log_init(void)
-{
-    // Disable logging initialization
-    // ret_code_t err_code = NRF_LOG_INIT(NULL);
-    // APP_ERROR_CHECK(err_code);
-    // NRF_LOG_DEFAULT_BACKENDS_INIT();
-}
-
-
 /**@brief Function for initializing power management.
  */
 static void power_management_init(void)
@@ -1127,7 +1042,6 @@ static void power_management_init(void)
  */
 static void idle_state_handle(void)
 {
-    // Remove logging check
     nrf_pwr_mgmt_run();
 }
 
@@ -1168,18 +1082,6 @@ const char *fds_err_str(ret_code_t ret)
 
 static void fds_evt_handler(fds_evt_t const * p_evt)
 {
-    if (p_evt->result == NRF_SUCCESS)
-    {
-        NRF_LOG_DEBUG("Event: %s received (NRF_SUCCESS)",
-                      fds_evt_str[p_evt->id]);
-    }
-    else
-    {
-        NRF_LOG_DEBUG("Event: %s received (%s)",
-                      fds_evt_str[p_evt->id],
-                      fds_err_str(p_evt->result));
-    }
-
     switch (p_evt->id)
     {
         case FDS_EVT_INIT:
@@ -1193,9 +1095,7 @@ static void fds_evt_handler(fds_evt_t const * p_evt)
         {
             if (p_evt->result == NRF_SUCCESS)
             {
-                NRF_LOG_INFO("Record ID:\t0x%04x",  p_evt->write.record_id);
-                NRF_LOG_INFO("File ID:\t0x%04x",    p_evt->write.file_id);
-                NRF_LOG_INFO("Record key:\t0x%04x", p_evt->write.record_key);
+                // Record written successfully
             }
         } break;
 
@@ -1203,9 +1103,7 @@ static void fds_evt_handler(fds_evt_t const * p_evt)
         {
             if (p_evt->result == NRF_SUCCESS)
             {
-                NRF_LOG_INFO("Record ID:\t0x%04x",  p_evt->del.record_id);
-                NRF_LOG_INFO("File ID:\t0x%04x",    p_evt->del.file_id);
-                NRF_LOG_INFO("Record key:\t0x%04x", p_evt->del.record_key);
+                // Record deleted successfully
             }
             m_delete_all.pending = false;
         } break;
@@ -1247,12 +1145,8 @@ static void wait_for_fds_ready(void)
 void gpio_event_handler(uint8_t pin_no, uint8_t button_action) {
     if (pin_no == GPIO_INPUT_PIN) {
         if (button_action == APP_BUTTON_PUSH) {
-            NRF_LOG_DEBUG("GPIO P0.4 went LOW");
-            NRF_LOG_INFO("AT Command mode is OFF");
             m_at_command_mode = false;
         } else if (button_action == APP_BUTTON_RELEASE) {
-            NRF_LOG_DEBUG("GPIO P0.4 went HIGH");
-            NRF_LOG_INFO("AT Command mode is ON");
             m_at_command_mode = true;
         }
     }
@@ -1379,11 +1273,7 @@ int main(void)
 
     // Initialize.
     uart_init();
-    // log_init();  // Remove logging initialization
     timers_init();
-    //buttons_leds_init(&erase_bonds);
-
-    // Initialize GPIO
     gpio_init();
 
     //Check the state of AT command pin
