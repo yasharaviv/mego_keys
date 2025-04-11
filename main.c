@@ -101,12 +101,13 @@
 #define NUS_SERVICE_UUID_TYPE           BLE_UUID_TYPE_VENDOR_BEGIN                  /**< UUID type for the Nordic UART Service (vendor specific). */
 
 // Key exchange message types
-#define MSG_TYPE_KEY_EXCHANGE_REQ       0x0001  /**< Key exchange request message type */
-#define MSG_TYPE_KEY_EXCHANGE_RESP      0x0002  /**< Key exchange response message type */
-#define MSG_TYPE_DATA                   0x0003  /**< Encrypted data message type */
+#define MSG_TYPE_KEY_EXCHANGE_REQ       0x01  // Reduced from 2 bytes to 1 byte
+#define MSG_TYPE_KEY_EXCHANGE_RESP      0x02  // Reduced from 2 bytes to 1 byte
+#define MSG_TYPE_DATA                   0x03  // Reduced from 2 bytes to 1 byte
 
-#define KEY_EXCHANGE_MSG_HEADER_SIZE    2       /**< Size of message type header */
-#define PUBLIC_KEY_SIZE                 48      /**< Size of secp192r1 public key (was 64 for secp256r1) */
+#define KEY_EXCHANGE_MSG_HEADER_SIZE    1     // Reduced from 2 bytes to 1 byte
+#define PUBLIC_KEY_SIZE                 48    // secp192r1 public key size
+#define MAX_MESSAGE_SIZE                (KEY_EXCHANGE_MSG_HEADER_SIZE + PUBLIC_KEY_SIZE)
 
 #define APP_BLE_OBSERVER_PRIO           3                                           /**< Application's BLE observer priority. You shouldn't need to modify this value. */
 
@@ -215,14 +216,14 @@ static void nrf_qwr_error_handler(uint32_t nrf_error)
 /////////////////////////////////////////////////
 //encrypt globals
 /////////////////////////////////////////////////
-#define NRF_CRYPTO_AES_MAX_DATA_SIZE    (64)
-#define BASE64_MAX_DATA_SIZE            (64)
+#define NRF_CRYPTO_AES_MAX_DATA_SIZE    (256)
+#define BASE64_MAX_DATA_SIZE (256)
 
-// ECDH related structures and variables
+// Optimize ECDH related structures and variables
 static nrf_crypto_ecc_private_key_t m_private_key;
 static nrf_crypto_ecc_public_key_t m_public_key;
-static nrf_crypto_ecc_secp192r1_raw_public_key_t m_raw_public_key;
-static nrf_crypto_ecdh_secp192r1_shared_secret_t m_shared_secret;
+static uint8_t m_raw_public_key[PUBLIC_KEY_SIZE];
+static uint8_t m_shared_secret[24];   // secp192r1 shared secret size
 static bool m_ecdh_initialized = false;
 
 static uint8_t m_key[32] = {'A', 'O', 'R', 'D', 'I', 'C', ' ',
@@ -274,7 +275,7 @@ static bool volatile m_fds_initialized;
 
 /////////////////////////////////////////////////
 
-void print_as_hex(const uint8_t *data, int len) {
+void print_as_hex(uint8_t *data, int len) {
     char buff[256] = {0};
     int offset = 0;
 
@@ -349,18 +350,30 @@ ret_code_t ecdh_init(void)
                                                &g_nrf_crypto_ecc_secp192r1_curve_info,
                                                &m_private_key,
                                                &m_public_key);
-    APP_ERROR_CHECK(err_code);
+    if (err_code != NRF_SUCCESS)
+    {
+        return err_code;
+    }
 
     // Convert public key to raw format for transmission
     size = sizeof(m_raw_public_key);
     err_code = nrf_crypto_ecc_public_key_to_raw(&m_public_key,
                                                m_raw_public_key,
                                                &size);
-    APP_ERROR_CHECK(err_code);
+    if (err_code != NRF_SUCCESS)
+    {
+        nrf_crypto_ecc_private_key_free(&m_private_key);
+        nrf_crypto_ecc_public_key_free(&m_public_key);
+        return err_code;
+    }
 
     // Free the public key structure as we only need the raw format
     err_code = nrf_crypto_ecc_public_key_free(&m_public_key);
-    APP_ERROR_CHECK(err_code);
+    if (err_code != NRF_SUCCESS)
+    {
+        nrf_crypto_ecc_private_key_free(&m_private_key);
+        return err_code;
+    }
 
     m_ecdh_initialized = true;
     return NRF_SUCCESS;
@@ -373,12 +386,30 @@ ret_code_t ecdh_compute_shared_secret(const uint8_t *p_peer_public_key, size_t k
     nrf_crypto_ecc_public_key_t peer_public_key;
     size_t shared_secret_size;
 
+    if (!m_ecdh_initialized)
+    {
+        return NRF_ERROR_INVALID_STATE;
+    }
+
+    if (p_peer_public_key == NULL)
+    {
+        return NRF_ERROR_NULL;
+    }
+
+    if (key_size != sizeof(m_raw_public_key))
+    {
+        return NRF_ERROR_INVALID_LENGTH;
+    }
+
     // Convert received public key to internal format
     err_code = nrf_crypto_ecc_public_key_from_raw(&g_nrf_crypto_ecc_secp192r1_curve_info,
                                                  &peer_public_key,
                                                  p_peer_public_key,
                                                  key_size);
-    APP_ERROR_CHECK(err_code);
+    if (err_code != NRF_SUCCESS)
+    {
+        return err_code;
+    }
 
     // Compute shared secret
     shared_secret_size = sizeof(m_shared_secret);
@@ -387,113 +418,56 @@ ret_code_t ecdh_compute_shared_secret(const uint8_t *p_peer_public_key, size_t k
                                       &peer_public_key,
                                       m_shared_secret,
                                       &shared_secret_size);
-    APP_ERROR_CHECK(err_code);
+    
+    // Clean up regardless of success
+    nrf_crypto_ecc_public_key_free(&peer_public_key);
 
-    // Clean up
-    err_code = nrf_crypto_ecc_public_key_free(&peer_public_key);
-    APP_ERROR_CHECK(err_code);
+    if (err_code != NRF_SUCCESS)
+    {
+        return err_code;
+    }
 
     return NRF_SUCCESS;
 }
 
-//Encryption method
-ret_code_t encrypt_data(char * data, int len) 
-{     
-    ret_code_t  ret_val;
-
-    if (!m_ecdh_initialized)
+// Clean up ECDH resources
+void ecdh_cleanup(void)
+{
+    if (m_ecdh_initialized)
     {
-        return NRF_ERROR_INVALID_STATE;
+        nrf_crypto_ecc_private_key_free(&m_private_key);
+        m_ecdh_initialized = false;
     }
-
-    crypt_init();
-
-    memset(encrypted_data, 0, sizeof(encrypted_data));    
-
-    char data_to_encrypt[NRF_CRYPTO_AES_MAX_DATA_SIZE];
-    int data_to_encrypt_len = 0;
-
-    //We set the buffer with 0x4 instead of 0x0 due to the way the decryption in the android app works.
-    memset(data_to_encrypt, 4, sizeof(data_to_encrypt));
-    
-    memcpy(data_to_encrypt, data, len);     
-    
-    //len should be a multiple of 16. so we take the closest 16 multiple to len.
-    data_to_encrypt_len = ((len / 16)  + 1) * 16;  //integer devided by 16 
-
-    encrypted_data_len = sizeof(encrypted_data);
-
-    /* Encrypt using the shared secret as the key */
-    ret_val = nrf_crypto_aes_finalize(&cbc_encr_ctx,
-                                      (uint8_t *)data_to_encrypt,
-                                      data_to_encrypt_len,
-                                      (uint8_t *)encrypted_data,
-                                      &encrypted_data_len);
-     
-    return ret_val;
 }
 
-//Decryption method
-ret_code_t decrypt_data(const uint8_t * data, int len) 
-{    
-    ret_code_t  ret_val;
-
-    if (!m_ecdh_initialized)
-    {
-        NRF_LOG_ERROR("ECDH not initialized!");
-        return NRF_ERROR_INVALID_STATE;
-    }
-
-    if (len % 16 != 0)
-    {
-        NRF_LOG_ERROR("decrypt_data, invalid size!");  
-        return NRF_ERROR_INVALID_LENGTH;
-    }
-
-    crypt_init();
-    
-    memset(decrypted_data, 0, sizeof(decrypted_data));
-
-    decrypted_data_len = sizeof(decrypted_data);
-    
-    ret_val = nrf_crypto_aes_crypt(&cbc_decr_ctx,
-                                   p_cbc_info,
-                                   NRF_CRYPTO_DECRYPT,
-                                   m_shared_secret,  // Use shared secret as key
-                                   iv,
-                                   (uint8_t *)data,
-                                   len,
-                                   (uint8_t *)decrypted_data,
-                                   &decrypted_data_len);
-     
-    return ret_val;
-}
-
-/** @brief Function to handle key exchange over BLE.
- *
- * @param[in] p_data     Pointer to received data
- * @param[in] length     Length of received data
- * @param[in] conn_handle Connection handle
- *
- * @return NRF_SUCCESS if key exchange was successful, otherwise an error code.
- */
+// Handle key exchange protocol
 static ret_code_t handle_key_exchange(const uint8_t * p_data, uint16_t length, uint16_t conn_handle)
 {
     ret_code_t err_code;
     static bool key_exchanged = false;
     
+    if (p_data == NULL)
+    {
+        return NRF_ERROR_NULL;
+    }
+
+    if (key_exchanged)
+    {
+        return NRF_SUCCESS;
+    }
+
     if (length < KEY_EXCHANGE_MSG_HEADER_SIZE)
     {
         return NRF_ERROR_INVALID_LENGTH;
     }
 
-    uint16_t msg_type = (p_data[0] << 8) | p_data[1];
+    uint8_t msg_type = p_data[0];  // Single byte message type
 
     switch (msg_type)
     {
         case MSG_TYPE_KEY_EXCHANGE_REQ:
         {
-            if (length != KEY_EXCHANGE_MSG_HEADER_SIZE + PUBLIC_KEY_SIZE)
+            if (length != MAX_MESSAGE_SIZE)
             {
                 return NRF_ERROR_INVALID_LENGTH;
             }
@@ -501,12 +475,14 @@ static ret_code_t handle_key_exchange(const uint8_t * p_data, uint16_t length, u
             // Compute shared secret from received public key
             err_code = ecdh_compute_shared_secret(p_data + KEY_EXCHANGE_MSG_HEADER_SIZE, 
                                                 PUBLIC_KEY_SIZE);
-            APP_ERROR_CHECK(err_code);
+            if (err_code != NRF_SUCCESS)
+            {
+                return err_code;
+            }
 
             // Send our public key back
-            uint8_t response[KEY_EXCHANGE_MSG_HEADER_SIZE + PUBLIC_KEY_SIZE];
-            response[0] = (MSG_TYPE_KEY_EXCHANGE_RESP >> 8) & 0xFF;
-            response[1] = MSG_TYPE_KEY_EXCHANGE_RESP & 0xFF;
+            uint8_t response[MAX_MESSAGE_SIZE];
+            response[0] = MSG_TYPE_KEY_EXCHANGE_RESP;
             memcpy(response + KEY_EXCHANGE_MSG_HEADER_SIZE, 
                   m_raw_public_key, 
                   sizeof(m_raw_public_key));
@@ -519,18 +495,17 @@ static ret_code_t handle_key_exchange(const uint8_t * p_data, uint16_t length, u
                     (err_code != NRF_ERROR_RESOURCES) &&
                     (err_code != NRF_ERROR_NOT_FOUND))
                 {
-                    APP_ERROR_CHECK(err_code);
+                    return err_code;
                 }
             } while (err_code == NRF_ERROR_RESOURCES);
 
             key_exchanged = true;
-            NRF_LOG_INFO("Key exchange completed successfully");
-            break;
+            return NRF_SUCCESS;
         }
 
         case MSG_TYPE_KEY_EXCHANGE_RESP:
         {
-            if (length != KEY_EXCHANGE_MSG_HEADER_SIZE + PUBLIC_KEY_SIZE)
+            if (length != MAX_MESSAGE_SIZE)
             {
                 return NRF_ERROR_INVALID_LENGTH;
             }
@@ -538,18 +513,18 @@ static ret_code_t handle_key_exchange(const uint8_t * p_data, uint16_t length, u
             // Compute shared secret from received public key
             err_code = ecdh_compute_shared_secret(p_data + KEY_EXCHANGE_MSG_HEADER_SIZE, 
                                                 PUBLIC_KEY_SIZE);
-            APP_ERROR_CHECK(err_code);
+            if (err_code != NRF_SUCCESS)
+            {
+                return err_code;
+            }
 
             key_exchanged = true;
-            NRF_LOG_INFO("Key exchange completed successfully");
-            break;
+            return NRF_SUCCESS;
         }
 
         default:
             return NRF_ERROR_INVALID_DATA;
     }
-
-    return NRF_SUCCESS;
 }
 
 /**@brief Function for handling the data from the Nordic UART Service.
@@ -1370,8 +1345,3 @@ int main(void)
         idle_state_handle();
     }
 }
-
-
-/**
- * @}
- */
