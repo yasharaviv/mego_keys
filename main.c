@@ -97,6 +97,18 @@ void flash_mgr_flash_mgr_init(void);
 const uint8_t *flash_mgr_get_encryption_key(void);
 const char *flash_mgr_get_device_name(void);
 
+/**@brief Function for handling Queued Write Module errors.
+ *
+ * @details A pointer to this function will be passed to each service which may need to inform the
+ *          application about an error.
+ *
+ * @param[in]   nrf_error   Error code containing information about what went wrong.
+ */
+static void nrf_qwr_error_handler(uint32_t nrf_error)
+{
+    APP_ERROR_HANDLER(nrf_error);
+}
+
 #define APP_BLE_CONN_CFG_TAG            1                                           /**< A tag identifying the SoftDevice BLE configuration. */
 
 #define DEVICE_NAME                     "MEGO"                               /**< Name of device. Will be included in the advertising data. */
