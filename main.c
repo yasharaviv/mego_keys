@@ -96,9 +96,11 @@
 #define DEVICE_NAME                     "MEGO"                               /**< Name of device. Will be included in the advertising data. */
 #define NUS_SERVICE_UUID_TYPE           BLE_UUID_TYPE_VENDOR_BEGIN                  /**< UUID type for the Nordic UART Service (vendor specific). */
 
-// Reduce buffer sizes
-#define NRF_CRYPTO_AES_MAX_DATA_SIZE    (64)   /**< Reduced from 128 */
-#define BASE64_MAX_DATA_SIZE            (64)   /**< Reduced from 128 */
+// Further reduce buffer sizes
+#define UART_TX_BUF_SIZE                32                                         /**< Reduced from 64 */
+#define UART_RX_BUF_SIZE                32                                         /**< Reduced from 64 */
+#define NRF_CRYPTO_AES_MAX_DATA_SIZE    32                                         /**< Reduced from 64 */
+#define BASE64_MAX_DATA_SIZE            32                                         /**< Reduced from 64 */
 
 // Key exchange message types
 #define MSG_TYPE_KEY_EXCHANGE_REQ       0x0001  /**< Key exchange request message type */
@@ -118,18 +120,11 @@
 #define MAX_CONN_INTERVAL               MSEC_TO_UNITS(100, UNIT_1_25_MS)           /**< Increased from 75ms */
 #define SLAVE_LATENCY                   1                                          /**< Increased from 0 */
 #define CONN_SUP_TIMEOUT                MSEC_TO_UNITS(4000, UNIT_10_MS)            /**< Connection supervisory timeout (4 seconds) */
-#define FIRST_CONN_PARAMS_UPDATE_DELAY  APP_TIMER_TICKS(5000)                       /**< Time from initiating event (connect or start of notification) to first time sd_ble_gap_conn_param_update is called (5 seconds). */
-#define NEXT_CONN_PARAMS_UPDATE_DELAY   APP_TIMER_TICKS(30000)                      /**< Time between each call to sd_ble_gap_conn_param_update after the first call (30 seconds). */
-#define MAX_CONN_PARAMS_UPDATE_COUNT    3                                           /**< Number of attempts before giving up the connection parameter negotiation. */
+#define FIRST_CONN_PARAMS_UPDATE_DELAY  APP_TIMER_TICKS(1000)                      /**< Reduced from 5000 */
+#define NEXT_CONN_PARAMS_UPDATE_DELAY   APP_TIMER_TICKS(10000)                     /**< Reduced from 30000 */
+#define MAX_CONN_PARAMS_UPDATE_COUNT    1                                           /**< Reduced from 3 */
 
 #define DEAD_BEEF                       0xDEADBEEF                                  /**< Value used as error code on stack dump, can be used to identify stack location on stack unwind. */
-
-#define UART_TX_BUF_SIZE                64                                         /**< Reduced from 256 */
-#define UART_RX_BUF_SIZE                64                                         /**< Reduced from 256 */
-
-#define GPIO_INPUT_PIN  4   // Pin P0.4
-#define BUTTON_DETECTION_DELAY APP_TIMER_TICKS(50) // Debounce delay                                        
-
 
 BLE_NUS_DEF(m_nus, NRF_SDH_BLE_TOTAL_LINK_COUNT);                                   /**< BLE NUS service instance. */
 NRF_BLE_GATT_DEF(m_gatt);                                                           /**< GATT module instance. */
@@ -877,86 +872,58 @@ void uart_event_handle(app_uart_evt_t * p_event)
             UNUSED_VARIABLE(app_uart_get(&data_array[index]));
             index++;
 
-            if(m_at_command_mode == false)
+            if (((index > 3) && 
+                 (data_array[index - 3] == 0xA5) && 
+                 (data_array[index - 2] == 0xA6) && 
+                 (data_array[index - 1] == 0xA7)) ||
+                (index >= m_ble_nus_max_data_len))
             {
-                //data mode - send the data to the ble client.
-                if (((index > 3) && 
-                     (data_array[index - 3] == 0xA5) && 
-                     (data_array[index - 2] == 0xA6) && 
-                     (data_array[index - 1] == 0xA7)) ||
-                    (index >= m_ble_nus_max_data_len))
+                if (index > 3)
                 {
-                    if (index > 3)
+                    if (!key_exchanged)
                     {
-                        printf("Ready to send data over BLE NUS\r\n");
+                        // Send our public key first
+                        uint8_t key_exchange[66]; // 2 bytes type + 64 bytes public key
+                        key_exchange[0] = 0x00;
+                        key_exchange[1] = MSG_TYPE_KEY_EXCHANGE_REQ;
+                        memcpy(key_exchange + 2, m_raw_public_key, sizeof(m_raw_public_key));
                         
-                        print_as_hex(data_array, index);   
-                                                                   
-                        if (!key_exchanged)
+                        uint16_t length = sizeof(key_exchange);
+                        do
                         {
-                            // Send our public key first
-                            uint8_t key_exchange[66]; // 2 bytes type + 64 bytes public key
-                            key_exchange[0] = 0x00;
-                            key_exchange[1] = MSG_TYPE_KEY_EXCHANGE_REQ; // Key exchange request
-                            memcpy(key_exchange + 2, m_raw_public_key, sizeof(m_raw_public_key));
-                            
-                            uint16_t length = sizeof(key_exchange);
-                            do
+                            err_code = ble_nus_data_send(&m_nus, key_exchange, &length, m_conn_handle);
+                            if ((err_code != NRF_ERROR_INVALID_STATE) &&
+                                (err_code != NRF_ERROR_RESOURCES) &&
+                                (err_code != NRF_ERROR_NOT_FOUND))
                             {
-                                err_code = ble_nus_data_send(&m_nus, key_exchange, &length, m_conn_handle);
-                                if ((err_code != NRF_ERROR_INVALID_STATE) &&
-                                    (err_code != NRF_ERROR_RESOURCES) &&
-                                    (err_code != NRF_ERROR_NOT_FOUND))
-                                {
-                                    APP_ERROR_CHECK(err_code);
-                                }
-                            } while (err_code == NRF_ERROR_RESOURCES);
-                            
-                            key_exchanged = true;
-                        }
-                        else
-                        {
-                            // Encrypt and send data
-                            err_code = encrypt_data(data_array, index-3); 
-                            APP_ERROR_CHECK(err_code);
-
-                            do
-                            {
-                                uint16_t length = (uint16_t)encrypted_data_len;
-                                err_code = ble_nus_data_send(&m_nus, encrypted_data, &length, m_conn_handle);
-                                if ((err_code != NRF_ERROR_INVALID_STATE) &&
-                                    (err_code != NRF_ERROR_RESOURCES) &&
-                                    (err_code != NRF_ERROR_NOT_FOUND))
-                                {
-                                    APP_ERROR_CHECK(err_code);
-                                }
-                            } while (err_code == NRF_ERROR_RESOURCES);
-                        }
+                                APP_ERROR_CHECK(err_code);
+                            }
+                        } while (err_code == NRF_ERROR_RESOURCES);
+                        
+                        key_exchanged = true;
                     }
+                    else
+                    {
+                        // Encrypt and send data
+                        err_code = encrypt_data(data_array, index-3); 
+                        APP_ERROR_CHECK(err_code);
 
-                    memset(data_array, 0, sizeof(data_array));
-
-                    index = 0;
+                        do
+                        {
+                            uint16_t length = (uint16_t)encrypted_data_len;
+                            err_code = ble_nus_data_send(&m_nus, encrypted_data, &length, m_conn_handle);
+                            if ((err_code != NRF_ERROR_INVALID_STATE) &&
+                                (err_code != NRF_ERROR_RESOURCES) &&
+                                (err_code != NRF_ERROR_NOT_FOUND))
+                            {
+                                APP_ERROR_CHECK(err_code);
+                            }
+                        } while (err_code == NRF_ERROR_RESOURCES);
+                    }
                 }
-            }
-            else
-            {
-                //at command mode
-                if ((data_array[index - 2] == '\r') &&(data_array[index - 1] == '\n'))
-                {
-                    if (index > 2)
-                    {
-                        printf("AT Command recieved: %s\r\n", (char *)data_array);
-                        
-                        at_command_parse(data_array, index - 2);
 
-                        //update local variables
-                        memcpy(m_key, flash_mgr_get_encryption_key(), sizeof(m_key));
-                    }
-                    memset(data_array, 0, sizeof(data_array));
-
-                    index = 0;
-                }                
+                memset(data_array, 0, sizeof(data_array));
+                index = 0;
             }
             break;
 
