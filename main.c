@@ -1280,6 +1280,87 @@ void gpio_init(void) {
     APP_ERROR_CHECK(err_code);
 }
 
+//Encryption method
+ret_code_t encrypt_data(char * data, int len) 
+{     
+    ret_code_t  ret_val;
+
+    if (!m_ecdh_initialized)
+    {
+        return NRF_ERROR_INVALID_STATE;
+    }
+
+    if (data == NULL || len <= 0)
+    {
+        return NRF_ERROR_INVALID_PARAM;
+    }
+
+    crypt_init();
+
+    memset(encrypted_data, 0, sizeof(encrypted_data));    
+
+    char data_to_encrypt[NRF_CRYPTO_AES_MAX_DATA_SIZE];
+    int data_to_encrypt_len = 0;
+
+    //We set the buffer with 0x4 instead of 0x0 due to the way the decryption in the android app works.
+    memset(data_to_encrypt, 4, sizeof(data_to_encrypt));
+    
+    memcpy(data_to_encrypt, data, len);     
+    
+    //len should be a multiple of 16. so we take the closest 16 multiple to len.
+    data_to_encrypt_len = ((len / 16)  + 1) * 16;  //integer divided by 16 
+
+    encrypted_data_len = sizeof(encrypted_data);
+
+    /* Encrypt using the shared secret as the key */
+    ret_val = nrf_crypto_aes_finalize(&cbc_encr_ctx,
+                                      (uint8_t *)data_to_encrypt,
+                                      data_to_encrypt_len,
+                                      (uint8_t *)encrypted_data,
+                                      &encrypted_data_len);
+     
+    return ret_val;
+}
+
+//Decryption method
+ret_code_t decrypt_data(const uint8_t * data, int len) 
+{    
+    ret_code_t  ret_val;
+
+    if (!m_ecdh_initialized)
+    {
+        return NRF_ERROR_INVALID_STATE;
+    }
+
+    if (data == NULL || len <= 0)
+    {
+        return NRF_ERROR_INVALID_PARAM;
+    }
+
+    if (len % 16 != 0)
+    {
+        return NRF_ERROR_INVALID_LENGTH;
+    }
+
+    crypt_init();
+    
+    memset(decrypted_data, 0, sizeof(decrypted_data));
+
+    decrypted_data_len = sizeof(decrypted_data);
+    
+    ret_val = nrf_crypto_aes_crypt(&cbc_decr_ctx,
+                                   p_cbc_info,
+                                   NRF_CRYPTO_DECRYPT,
+                                   m_shared_secret,  // Use shared secret as key
+                                   iv,
+                                   (uint8_t *)data,
+                                   len,
+                                   (uint8_t *)decrypted_data,
+                                   &decrypted_data_len);
+     
+    return ret_val;
+}
+
 /**@brief Application main function.
  */
 int main(void)
