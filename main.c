@@ -93,7 +93,6 @@
 // Function declarations
 ret_code_t encrypt_data(char *data, int len);
 ret_code_t decrypt_data(const uint8_t *data, int len);
-void at_command_parse(const char *command, int len);
 void flash_mgr_flash_mgr_init(void);
 const uint8_t *flash_mgr_get_encryption_key(void);
 const char *flash_mgr_get_device_name(void);
@@ -146,75 +145,6 @@ static ble_uuid_t m_adv_uuids[]          =                                      
 {
     {BLE_UUID_NUS_SERVICE, NUS_SERVICE_UUID_TYPE}
 };
-
-static bool m_at_command_mode = false;
-
-
-/**@brief Function for assert macro callback.
- *
- * @details This function will be called in case of an assert in the SoftDevice.
- *
- * @warning This handler is an example only and does not fit a final product. You need to analyse
- *          how your product is supposed to react in case of Assert.
- * @warning On assert from the SoftDevice, the system can only recover on reset.
- *
- * @param[in] line_num    Line number of the failing ASSERT call.
- * @param[in] p_file_name File name of the failing ASSERT call.
- */
-void assert_nrf_callback(uint16_t line_num, const uint8_t * p_file_name)
-{
-    app_error_handler(DEAD_BEEF, line_num, p_file_name);
-}
-
-/**@brief Function for initializing the timer module.
- */
-static void timers_init(void)
-{
-    ret_code_t err_code = app_timer_init();
-    APP_ERROR_CHECK(err_code);
-}
-
-/**@brief Function for the GAP initialization.
- *
- * @details This function will set up all the necessary GAP (Generic Access Profile) parameters of
- *          the device. It also sets the permissions and appearance.
- */
-static void gap_params_init(const char * device_name)
-{
-    uint32_t                err_code;
-    ble_gap_conn_params_t   gap_conn_params;
-    ble_gap_conn_sec_mode_t sec_mode;
-
-    BLE_GAP_CONN_SEC_MODE_SET_OPEN(&sec_mode);
-
-    err_code = sd_ble_gap_device_name_set(&sec_mode,
-                                          (const uint8_t *) device_name,
-                                          strlen(device_name));
-    APP_ERROR_CHECK(err_code);
-
-    memset(&gap_conn_params, 0, sizeof(gap_conn_params));
-
-    gap_conn_params.min_conn_interval = MIN_CONN_INTERVAL;
-    gap_conn_params.max_conn_interval = MAX_CONN_INTERVAL;
-    gap_conn_params.slave_latency     = SLAVE_LATENCY;
-    gap_conn_params.conn_sup_timeout  = CONN_SUP_TIMEOUT;
-
-    err_code = sd_ble_gap_ppcp_set(&gap_conn_params);
-    APP_ERROR_CHECK(err_code);
-}
-
-
-/**@brief Function for handling Queued Write Module errors.
- *
- * @details A pointer to this function will be passed to each service which may need to inform the
- *          application about an error.
- *
- * @param[in]   nrf_error   Error code containing information about what went wrong.
- */
-static void nrf_qwr_error_handler(uint32_t nrf_error)
-{
-    APP_ERROR_HANDLER(nrf_error);
-}
 
 /////////////////////////////////////////////////
 //encrypt globals
@@ -863,75 +793,58 @@ void uart_event_handle(app_uart_evt_t * p_event)
             UNUSED_VARIABLE(app_uart_get(&data_array[index]));
             index++;
 
-            if(m_at_command_mode == false)
+            if (((index > 3) && 
+                 (data_array[index - 3] == 0xA5) && 
+                 (data_array[index - 2] == 0xA6) && 
+                 (data_array[index - 1] == 0xA7)) ||
+                (index >= m_ble_nus_max_data_len))
             {
-                if (((index > 3) && 
-                     (data_array[index - 3] == 0xA5) && 
-                     (data_array[index - 2] == 0xA6) && 
-                     (data_array[index - 1] == 0xA7)) ||
-                    (index >= m_ble_nus_max_data_len))
+                if (index > 3)
                 {
-                    if (index > 3)
+                    mbedtls_base64_encode(encoded_data, sizeof(encoded_data), &encoded_data_len, (const unsigned char *)data_array, index-3);
+
+                    if (!key_exchanged)
                     {
-                        mbedtls_base64_encode(encoded_data, sizeof(encoded_data), &encoded_data_len, (const unsigned char *)data_array, index-3);
-
-                        if (!key_exchanged)
+                        uint8_t key_exchange[66];
+                        key_exchange[0] = 0x00;
+                        key_exchange[1] = MSG_TYPE_KEY_EXCHANGE_REQ;
+                        memcpy(key_exchange + 2, m_raw_public_key, sizeof(m_raw_public_key));
+                        
+                        uint16_t length = sizeof(key_exchange);
+                        do
                         {
-                            uint8_t key_exchange[66];
-                            key_exchange[0] = 0x00;
-                            key_exchange[1] = MSG_TYPE_KEY_EXCHANGE_REQ;
-                            memcpy(key_exchange + 2, m_raw_public_key, sizeof(m_raw_public_key));
-                            
-                            uint16_t length = sizeof(key_exchange);
-                            do
+                            err_code = ble_nus_data_send(&m_nus, key_exchange, &length, m_conn_handle);
+                            if ((err_code != NRF_ERROR_INVALID_STATE) &&
+                                (err_code != NRF_ERROR_RESOURCES) &&
+                                (err_code != NRF_ERROR_NOT_FOUND))
                             {
-                                err_code = ble_nus_data_send(&m_nus, key_exchange, &length, m_conn_handle);
-                                if ((err_code != NRF_ERROR_INVALID_STATE) &&
-                                    (err_code != NRF_ERROR_RESOURCES) &&
-                                    (err_code != NRF_ERROR_NOT_FOUND))
-                                {
-                                    APP_ERROR_CHECK(err_code);
-                                }
-                            } while (err_code == NRF_ERROR_RESOURCES);
-                            
-                            key_exchanged = true;
-                        }
-                        else
-                        {
-                            err_code = encrypt_data(encoded_data, encoded_data_len); 
-                            APP_ERROR_CHECK(err_code);
-
-                            do
-                            {
-                                uint16_t length = (uint16_t)encrypted_data_len;
-                                err_code = ble_nus_data_send(&m_nus, encrypted_data, &length, m_conn_handle);
-                                if ((err_code != NRF_ERROR_INVALID_STATE) &&
-                                    (err_code != NRF_ERROR_RESOURCES) &&
-                                    (err_code != NRF_ERROR_NOT_FOUND))
-                                {
-                                    APP_ERROR_CHECK(err_code);
-                                }
-                            } while (err_code == NRF_ERROR_RESOURCES);
-                        }
+                                APP_ERROR_CHECK(err_code);
+                            }
+                        } while (err_code == NRF_ERROR_RESOURCES);
+                        
+                        key_exchanged = true;
                     }
+                    else
+                    {
+                        err_code = encrypt_data(encoded_data, encoded_data_len); 
+                        APP_ERROR_CHECK(err_code);
 
-                    memset(data_array, 0, sizeof(data_array));
-                    index = 0;
+                        do
+                        {
+                            uint16_t length = (uint16_t)encrypted_data_len;
+                            err_code = ble_nus_data_send(&m_nus, encrypted_data, &length, m_conn_handle);
+                            if ((err_code != NRF_ERROR_INVALID_STATE) &&
+                                (err_code != NRF_ERROR_RESOURCES) &&
+                                (err_code != NRF_ERROR_NOT_FOUND))
+                            {
+                                APP_ERROR_CHECK(err_code);
+                            }
+                        } while (err_code == NRF_ERROR_RESOURCES);
+                    }
                 }
-            }
-            else
-            {
-                if ((data_array[index - 2] == '\r') &&(data_array[index - 1] == '\n'))
-                {
-                    if (index > 2)
-                    {
-                        data_array[index - 2] = '\0';
-                        at_command_parse(data_array, index - 2);
-                        memcpy(m_key, flash_mgr_get_encryption_key(), sizeof(m_key));
-                    }
-                    memset(data_array, 0, sizeof(data_array));
-                    index = 0;
-                }                
+
+                memset(data_array, 0, sizeof(data_array));
+                index = 0;
             }
             break;
 
@@ -1142,13 +1055,7 @@ static void wait_for_fds_ready(void)
 
 // GPIO event handler
 void gpio_event_handler(uint8_t pin_no, uint8_t button_action) {
-    if (pin_no == GPIO_INPUT_PIN) {
-        if (button_action == APP_BUTTON_PUSH) {
-            m_at_command_mode = false;
-        } else if (button_action == APP_BUTTON_RELEASE) {
-            m_at_command_mode = true;
-        }
-    }
+    // Remove AT command mode handling
 }
 
 // Button configuration
@@ -1258,7 +1165,6 @@ ret_code_t decrypt_data(const uint8_t * data, int len)
 // Function declarations
 ret_code_t encrypt_data(char *data, int len);
 ret_code_t decrypt_data(const uint8_t *data, int len);
-void at_command_parse(const char *command, int len);
 void flash_mgr_flash_mgr_init(void);
 const uint8_t *flash_mgr_get_encryption_key(void);
 const char *flash_mgr_get_device_name(void);
@@ -1274,15 +1180,6 @@ int main(void)
     uart_init();
     timers_init();
     gpio_init();
-
-    //Check the state of AT command pin
-    if (nrf_gpio_pin_read(GPIO_INPUT_PIN) == 0) {
-        // Button is pressed at startup
-        m_at_command_mode = false;
-    } else {
-        // Button is NOT pressed at startup
-        m_at_command_mode = true;
-    }
        
     ret = nrf_crypto_init();
     APP_ERROR_CHECK(ret);
