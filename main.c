@@ -1361,6 +1361,14 @@ ret_code_t decrypt_data(const uint8_t * data, int len)
     return ret_val;
 }
 
+// Function declarations
+ret_code_t encrypt_data(char *data, int len);
+ret_code_t decrypt_data(const uint8_t *data, int len);
+void at_command_parse(const char *command, int len);
+void flash_mgr_flash_mgr_init(void);
+const uint8_t *flash_mgr_get_encryption_key(void);
+const char *flash_mgr_get_device_name(void);
+
 /**@brief Application main function.
  */
 int main(void)
@@ -1396,8 +1404,8 @@ int main(void)
     flash_storage_init();
     flash_mgr_flash_mgr_init();    
 
-    char * device_name = flash_mgr_get_device_name();
-    const uint8_t * key = flash_mgr_get_encryption_key();
+    const char *device_name = flash_mgr_get_device_name();
+    const uint8_t *key = flash_mgr_get_encryption_key();
     memcpy(m_key, key, sizeof(m_key));
         
     ble_stack_init();
