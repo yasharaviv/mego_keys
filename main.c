@@ -1064,71 +1064,17 @@ static void wait_for_fds_ready(void)
     }
 }
 
-// GPIO event handler
-void gpio_event_handler(uint8_t pin_no, uint8_t button_action) {
-    if (pin_no == GPIO_INPUT_PIN) {
-        if (button_action == APP_BUTTON_PUSH) {
-            printf("GPIO P0.4 went LOW\r\n");
-            printf("AT Command mode is OFF\r\n");
-            m_at_command_mode = false;
-        } else if (button_action == APP_BUTTON_RELEASE) {
-            printf("GPIO P0.4 went HIGH\r\n");
-            printf("AT Command mode is ON\r\n");
-            m_at_command_mode = true;
-        }
-    }
-}
-
-// Button configuration
-static app_button_cfg_t button_cfg[] = {
-    {GPIO_INPUT_PIN, false, NRF_GPIO_PIN_PULLUP, gpio_event_handler}
-};
-
-void gpio_init(void) {
-    ret_code_t err_code;
-
-    // Initialize the GPIOTE module if not already initialized
-    if (!nrf_drv_gpiote_is_init()) {
-        err_code = nrf_drv_gpiote_init();
-        APP_ERROR_CHECK(err_code);
-    }
-
-    // Initialize app_button module
-    err_code = app_button_init(button_cfg, ARRAY_SIZE(button_cfg), BUTTON_DETECTION_DELAY);
-    APP_ERROR_CHECK(err_code);
-
-    // Enable button detection
-    err_code = app_button_enable();
-    APP_ERROR_CHECK(err_code);
-}
-
 /**@brief Application main function.
  */
 int main(void)
 {
-    bool erase_bonds;
     ret_code_t ret;
 
     // Initialize.
     uart_init();
     log_init();
     timers_init();
-    //buttons_leds_init(&erase_bonds);
-
-    // Initialize GPIO
-    gpio_init();
-
-    //Check the state of AT command pin
-    if (nrf_gpio_pin_read(GPIO_INPUT_PIN) == 0) {
-        printf("AT Command mode is OFF\r\n");
-        // Button is pressed at startup
-        m_at_command_mode = false;
-    } else {
-        printf("AT Command mode is ON\r\n");
-        // Button is NOT pressed at startup
-        m_at_command_mode = true;
-    }
-       
+   
     ret = nrf_crypto_init();
     APP_ERROR_CHECK(ret);
    
@@ -1153,12 +1099,7 @@ int main(void)
     ret = ecdh_init();
     APP_ERROR_CHECK(ret);
     
-    // Start execution.
-    printf("OK\r\n");
-    printf("Debug logging for UART over RTT started.\r\n");
-    
     crypt_init();    
-
     advertising_start();
 
     // Enter main loop.
