@@ -112,20 +112,20 @@
 
 #define APP_ADV_INTERVAL                64                                          /**< The advertising interval (in units of 0.625 ms. This value corresponds to 40 ms). */
 
-#define APP_ADV_DURATION                18000                                       /**< The advertising duration (180 seconds) in units of 10 milliseconds. */
+#define APP_ADV_DURATION                9000                                       /**< Reduced from 18000 (90 seconds) */
 
-#define MIN_CONN_INTERVAL               MSEC_TO_UNITS(20, UNIT_1_25_MS)             /**< Minimum acceptable connection interval (20 ms), Connection interval uses 1.25 ms units. */
-#define MAX_CONN_INTERVAL               MSEC_TO_UNITS(75, UNIT_1_25_MS)             /**< Maximum acceptable connection interval (75 ms), Connection interval uses 1.25 ms units. */
-#define SLAVE_LATENCY                   0                                           /**< Slave latency. */
-#define CONN_SUP_TIMEOUT                MSEC_TO_UNITS(4000, UNIT_10_MS)             /**< Connection supervisory timeout (4 seconds), Supervision Timeout uses 10 ms units. */
+#define MIN_CONN_INTERVAL               MSEC_TO_UNITS(50, UNIT_1_25_MS)            /**< Increased from 20ms */
+#define MAX_CONN_INTERVAL               MSEC_TO_UNITS(100, UNIT_1_25_MS)           /**< Increased from 75ms */
+#define SLAVE_LATENCY                   1                                          /**< Increased from 0 */
+#define CONN_SUP_TIMEOUT                MSEC_TO_UNITS(4000, UNIT_10_MS)            /**< Connection supervisory timeout (4 seconds) */
 #define FIRST_CONN_PARAMS_UPDATE_DELAY  APP_TIMER_TICKS(5000)                       /**< Time from initiating event (connect or start of notification) to first time sd_ble_gap_conn_param_update is called (5 seconds). */
 #define NEXT_CONN_PARAMS_UPDATE_DELAY   APP_TIMER_TICKS(30000)                      /**< Time between each call to sd_ble_gap_conn_param_update after the first call (30 seconds). */
 #define MAX_CONN_PARAMS_UPDATE_COUNT    3                                           /**< Number of attempts before giving up the connection parameter negotiation. */
 
 #define DEAD_BEEF                       0xDEADBEEF                                  /**< Value used as error code on stack dump, can be used to identify stack location on stack unwind. */
 
-#define UART_TX_BUF_SIZE                256                                         /**< UART TX buffer size. */
-#define UART_RX_BUF_SIZE                256                                         /**< UART RX buffer size. */
+#define UART_TX_BUF_SIZE                64                                         /**< Reduced from 256 */
+#define UART_RX_BUF_SIZE                64                                         /**< Reduced from 256 */
 
 #define GPIO_INPUT_PIN  4   // Pin P0.4
 #define BUTTON_DETECTION_DELAY APP_TIMER_TICKS(50) // Debounce delay                                        
@@ -265,45 +265,16 @@ static void fds_evt_handler(fds_evt_t const * p_evt)
 {
     if (p_evt->result == NRF_SUCCESS)
     {
-        printf("Event: %s received (NRF_SUCCESS)\r\n", fds_evt_str[p_evt->id]);
+        printf("FDS event: %d\r\n", p_evt->id);
     }
     else
     {
-        printf("Event: %s received (Error: 0x%x)\r\n", fds_evt_str[p_evt->id], p_evt->result);
+        printf("FDS error: 0x%x\r\n", p_evt->result);
     }
 
-    switch (p_evt->id)
+    if (p_evt->id == FDS_EVT_INIT && p_evt->result == NRF_SUCCESS)
     {
-        case FDS_EVT_INIT:
-            if (p_evt->result == NRF_SUCCESS)
-            {
-                m_fds_initialized = true;
-            }
-            break;
-
-        case FDS_EVT_WRITE:
-        {
-            if (p_evt->result == NRF_SUCCESS)
-            {
-                printf("Record ID:\t0x%04x\r\n",  p_evt->write.record_id);
-                printf("File ID:\t0x%04x\r\n",    p_evt->write.file_id);
-                printf("Record key:\t0x%04x\r\n", p_evt->write.record_key);
-            }
-        } break;
-
-        case FDS_EVT_DEL_RECORD:
-        {
-            if (p_evt->result == NRF_SUCCESS)
-            {
-                printf("Record ID:\t0x%04x\r\n",  p_evt->del.record_id);
-                printf("File ID:\t0x%04x\r\n",    p_evt->del.file_id);
-                printf("Record key:\t0x%04x\r\n", p_evt->del.record_key);
-            }
-            m_delete_all.pending = false;
-        } break;
-
-        default:
-            break;
+        m_fds_initialized = true;
     }
 }
 
@@ -1049,7 +1020,7 @@ static void advertising_init(void)
     init.advdata.include_appearance = false;
     init.advdata.flags              = BLE_GAP_ADV_FLAGS_LE_ONLY_LIMITED_DISC_MODE;
 
-    init.srdata.uuids_complete.uuid_cnt = sizeof(m_adv_uuids) / sizeof(m_adv_uuids[0]);
+    init.srdata.uuids_complete.uuid_cnt = 1;  // Only NUS service
     init.srdata.uuids_complete.p_uuids  = m_adv_uuids;
 
     init.config.ble_adv_fast_enabled  = true;
